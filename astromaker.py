@@ -3,6 +3,7 @@ from tkinter import ttk
 
 import math
 import os
+from itertools import combinations
 
 import swisseph as swe
 
@@ -150,6 +151,549 @@ ASPECT_SYMBOLS = {
 
 DEFAULT_MAJOR_ORB_DEG = 6.0
 DEFAULT_MINOR_ORB_DEG = 2.0
+
+# ============================================================
+# チャートパターン検出（コンソール用）
+# ============================================================
+
+def _sep(a: float, b: float) -> float:
+    return angular_separation_deg(a, b)
+
+def _hit(a: float, b: float, target: float, orb: float):
+    """return (ok, delta, sep)"""
+    s = _sep(a, b)
+    d = abs(s - target)
+    return (d <= orb), d, s
+
+def _get_positions(longitudes: dict, enabled_names: list[str]) -> dict[str, float]:
+    """None を落として position dict を作る"""
+    out = {}
+    for n in enabled_names:
+        v = longitudes.get(n)
+        if v is not None:
+            out[n] = float(v) % 360.0
+    return out
+
+def _dedup_tuples(items):
+    """list[tuple] をソート＋set で重複排除"""
+    seen = set()
+    out = []
+    for t in items:
+        key = tuple(t)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(t)
+    return out
+
+def detect_grand_trines(pos: dict[str, float], orb_trine: float):
+    hits = []
+    names = list(pos.keys())
+    for a, b, c in combinations(names, 3):
+        ok1, d1, _ = _hit(pos[a], pos[b], 120, orb_trine)
+        ok2, d2, _ = _hit(pos[b], pos[c], 120, orb_trine)
+        ok3, d3, _ = _hit(pos[c], pos[a], 120, orb_trine)
+        if ok1 and ok2 and ok3:
+            score = max(d1, d2, d3)
+            hits.append((score, tuple(sorted((a, b, c)))))
+    hits.sort(key=lambda x: x[0])
+    return [t for _, t in hits]
+
+def detect_t_squares(pos: dict[str, float], orb_opp: float, orb_sq: float):
+    """
+    A-B opposition, C squares both => (baseA, baseB, apexC)
+    """
+    hits = []
+    names = list(pos.keys())
+    for a, b in combinations(names, 2):
+        ok_opp, d_opp, _ = _hit(pos[a], pos[b], 180, orb_opp)
+        if not ok_opp:
+            continue
+        for c in names:
+            if c == a or c == b:
+                continue
+            ok1, d1, _ = _hit(pos[a], pos[c], 90, orb_sq)
+            ok2, d2, _ = _hit(pos[b], pos[c], 90, orb_sq)
+            if ok1 and ok2:
+                score = max(d_opp, d1, d2)
+                base = tuple(sorted((a, b)))
+                hits.append((score, base[0], base[1], c))
+    hits.sort(key=lambda x: x[0])
+    # 重複（base同じ＆apex同じ）を消す
+    seen = set()
+    out = []
+    for score, a, b, c in hits:
+        key = (a, b, c)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((a, b, c))
+    return out
+
+def detect_grand_crosses(pos: dict[str, float], orb_opp: float, orb_sq: float):
+    """
+    4天体で：opposition 2本 + square 4本（合計6ペア）
+    """
+    hits = []
+    names = list(pos.keys())
+    for a, b, c, d in combinations(names, 4):
+        pair = [(a, b), (a, c), (a, d), (b, c), (b, d), (c, d)]
+        opp = 0
+        sq = 0
+        worst = 0.0
+        ok = True
+        for x, y in pair:
+            ok_opp, d_opp, _ = _hit(pos[x], pos[y], 180, orb_opp)
+            ok_sq, d_sq, _ = _hit(pos[x], pos[y], 90, orb_sq)
+            if ok_opp:
+                opp += 1
+                worst = max(worst, d_opp)
+            elif ok_sq:
+                sq += 1
+                worst = max(worst, d_sq)
+            else:
+                ok = False
+                break
+        if ok and opp == 2 and sq == 4:
+            hits.append((worst, tuple(sorted((a, b, c, d)))))
+    hits.sort(key=lambda x: x[0])
+    return [t for _, t in hits]
+
+def detect_kites(pos: dict[str, float], grand_trines: list[tuple[str, str, str]],
+                 orb_opp: float, orb_sex: float):
+    """
+    Kite: Grand Trine (A,B,C) + D opposite one vertex (focus) AND D sextile the other two
+    => (A,B,C,D, focus)
+    """
+    hits = []
+    names_all = set(pos.keys())
+    for a, b, c in grand_trines:
+        tri = (a, b, c)
+        for focus in tri:
+            others = [x for x in tri if x != focus]
+            for d in names_all:
+                if d in tri:
+                    continue
+                ok_opp, d_opp, _ = _hit(pos[d], pos[focus], 180, orb_opp)
+                if not ok_opp:
+                    continue
+                ok_s1, d1, _ = _hit(pos[d], pos[others[0]], 60, orb_sex)
+                ok_s2, d2, _ = _hit(pos[d], pos[others[1]], 60, orb_sex)
+                if ok_s1 and ok_s2:
+                    score = max(d_opp, d1, d2)
+                    hits.append((score, tuple(sorted(tri)), d, focus))
+    hits.sort(key=lambda x: x[0])
+
+    out = []
+    seen = set()
+    for score, tri_sorted, d, focus in hits:
+        key = (tri_sorted, d, focus)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((*tri_sorted, d, focus))
+    return out
+
+def detect_mystic_rectangles(pos: dict[str, float], orb_opp: float, orb_trine: float, orb_sex: float):
+    """
+    Mystic Rectangle: 4天体で opposition 2本 + trine 2本 + sextile 2本
+    """
+    hits = []
+    names = list(pos.keys())
+    for a, b, c, d in combinations(names, 4):
+        pair = [(a, b), (a, c), (a, d), (b, c), (b, d), (c, d)]
+        cnt = {"opp": 0, "tri": 0, "sex": 0}
+        worst = 0.0
+        ok = True
+        for x, y in pair:
+            ok_opp, d_opp, _ = _hit(pos[x], pos[y], 180, orb_opp)
+            ok_tri, d_tri, _ = _hit(pos[x], pos[y], 120, orb_trine)
+            ok_sex, d_sex, _ = _hit(pos[x], pos[y], 60, orb_sex)
+            if ok_opp:
+                cnt["opp"] += 1
+                worst = max(worst, d_opp)
+            elif ok_tri:
+                cnt["tri"] += 1
+                worst = max(worst, d_tri)
+            elif ok_sex:
+                cnt["sex"] += 1
+                worst = max(worst, d_sex)
+            else:
+                ok = False
+                break
+        if ok and cnt["opp"] == 2 and cnt["tri"] == 2 and cnt["sex"] == 2:
+            hits.append((worst, tuple(sorted((a, b, c, d)))))
+    hits.sort(key=lambda x: x[0])
+    return [t for _, t in hits]
+
+def detect_yods(pos: dict[str, float], orb_sex: float, orb_quinc: float):
+    """
+    Yod: A-B sextile + C quincunx to both => (A,B, apexC)
+    """
+    hits = []
+    names = list(pos.keys())
+    for a, b in combinations(names, 2):
+        ok_sex, d_sex, _ = _hit(pos[a], pos[b], 60, orb_sex)
+        if not ok_sex:
+            continue
+        for c in names:
+            if c == a or c == b:
+                continue
+            ok1, d1, _ = _hit(pos[a], pos[c], 150, orb_quinc)
+            ok2, d2, _ = _hit(pos[b], pos[c], 150, orb_quinc)
+            if ok1 and ok2:
+                score = max(d_sex, d1, d2)
+                base = tuple(sorted((a, b)))
+                hits.append((score, base[0], base[1], c))
+    hits.sort(key=lambda x: x[0])
+
+    out = []
+    seen = set()
+    for score, a, b, c in hits:
+        key = (a, b, c)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((a, b, c))
+    return out
+
+def detect_boomerangs(pos: dict[str, float], yods: list[tuple[str, str, str]], orb_opp: float):
+    """
+    Boomerang: Yod + 4th planet opposite apex
+    => (A,B, apexC, D_opposite_apex)
+    """
+    hits = []
+    names = list(pos.keys())
+    for a, b, apex in yods:
+        for d in names:
+            if d in (a, b, apex):
+                continue
+            ok_opp, d_opp, _ = _hit(pos[d], pos[apex], 180, orb_opp)
+            if ok_opp:
+                hits.append((d_opp, a, b, apex, d))
+    hits.sort(key=lambda x: x[0])
+
+    out = []
+    seen = set()
+    for score, a, b, apex, d in hits:
+        key = (tuple(sorted((a, b))), apex, d)
+        if key in seen:
+            continue
+        seen.add(key)
+        base = tuple(sorted((a, b)))
+        out.append((base[0], base[1], apex, d))
+    return out
+
+def detect_golden_yods(pos: dict[str, float], orb_quint: float, orb_biquint: float):
+    """
+    Golden Yod / Quintile Yod（よくある定義）:
+      A-B biquintile(144) + C quintile(72) to both A and B
+    => (A,B, apexC)
+    """
+    hits = []
+    names = list(pos.keys())
+    for a, b in combinations(names, 2):
+        ok_bq, d_bq, _ = _hit(pos[a], pos[b], 144, orb_biquint)
+        if not ok_bq:
+            continue
+        for c in names:
+            if c == a or c == b:
+                continue
+            ok1, d1, _ = _hit(pos[a], pos[c], 72, orb_quint)
+            ok2, d2, _ = _hit(pos[b], pos[c], 72, orb_quint)
+            if ok1 and ok2:
+                score = max(d_bq, d1, d2)
+                base = tuple(sorted((a, b)))
+                hits.append((score, base[0], base[1], c))
+    hits.sort(key=lambda x: x[0])
+
+    out = []
+    seen = set()
+    for score, a, b, c in hits:
+        key = (a, b, c)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((a, b, c))
+    return out
+
+def detect_thors_hammers(pos: dict[str, float], orb_sq: float, orb_sesqui: float):
+    """
+    Thor's Hammer（よくある定義）:
+      A-B square(90) + C sesquiquadrate(135) to both A and B
+    => (A,B, apexC)
+    """
+    hits = []
+    names = list(pos.keys())
+    for a, b in combinations(names, 2):
+        ok_sq, d_sq, _ = _hit(pos[a], pos[b], 90, orb_sq)
+        if not ok_sq:
+            continue
+        for c in names:
+            if c == a or c == b:
+                continue
+            ok1, d1, _ = _hit(pos[a], pos[c], 135, orb_sesqui)
+            ok2, d2, _ = _hit(pos[b], pos[c], 135, orb_sesqui)
+            if ok1 and ok2:
+                score = max(d_sq, d1, d2)
+                base = tuple(sorted((a, b)))
+                hits.append((score, base[0], base[1], c))
+    hits.sort(key=lambda x: x[0])
+
+    out = []
+    seen = set()
+    for score, a, b, c in hits:
+        key = (a, b, c)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((a, b, c))
+    return out
+
+def detect_grand_sextiles(pos: dict[str, float], orb_sex: float, orb_tri: float, orb_opp: float):
+    """
+    Grand Sextile（スター・オブ・デイビッド）
+    理想形のペア数（6天体=15ペア）:
+      sextile 6本 / trine 6本 / opposition 3本
+    """
+    hits = []
+    names = list(pos.keys())
+    if len(names) < 6:
+        return []
+    for sext in combinations(names, 6):
+        sext = list(sext)
+        cnt = {"sex": 0, "tri": 0, "opp": 0}
+        worst = 0.0
+        ok = True
+        for x, y in combinations(sext, 2):
+            ok_sex, d_sex, _ = _hit(pos[x], pos[y], 60, orb_sex)
+            ok_tri, d_tri, _ = _hit(pos[x], pos[y], 120, orb_tri)
+            ok_opp, d_opp, _ = _hit(pos[x], pos[y], 180, orb_opp)
+            if ok_sex:
+                cnt["sex"] += 1
+                worst = max(worst, d_sex)
+            elif ok_tri:
+                cnt["tri"] += 1
+                worst = max(worst, d_tri)
+            elif ok_opp:
+                cnt["opp"] += 1
+                worst = max(worst, d_opp)
+            else:
+                ok = False
+                break
+        if ok and cnt["sex"] == 6 and cnt["tri"] == 6 and cnt["opp"] == 3:
+            hits.append((worst, tuple(sorted(sext))))
+    hits.sort(key=lambda x: x[0])
+    # 6天体検出は重いので、同じセットは重複排除
+    return [t for _, t in hits]
+
+def detect_stelliums(pos: dict[str, float], min_bodies: int = 3, max_span_deg: float = 10.0):
+    """
+    Stellium（合の集中）: 円周上で span <= max_span_deg に min_bodies 以上。
+    """
+    names = list(pos.keys())
+    if len(names) < min_bodies:
+        return []
+
+    # 0-360 を 2周分にして窓探索（円周対策）
+    pts = sorted((pos[n], n) for n in names)
+    pts2 = pts + [(lon + 360.0, n) for lon, n in pts]
+
+    hits = []
+    # スライディングウィンドウ
+    j = 0
+    for i in range(len(pts)):
+        while j < len(pts2) and (pts2[j][0] - pts2[i][0]) <= max_span_deg:
+            j += 1
+        window = pts2[i:j]
+        # 同じ天体が2周分で混ざるのを排除
+        uniq = []
+        seen = set()
+        for lon, n in window:
+            if n in seen:
+                continue
+            seen.add(n)
+            uniq.append(n)
+        if len(uniq) >= min_bodies:
+            # 正規化したキーで重複排除
+            key = tuple(sorted(uniq))
+            hits.append(key)
+
+    hits = _dedup_tuples(sorted(set(hits), key=lambda t: (-len(t), t)))
+    return hits
+
+def detect_distribution_pattern(pos: dict[str, float]):
+    """
+    ざっくり配置判定（厳密定義は流派で違うので“目安”）
+    - 最大ギャップ max_gap
+    - 全体スパン span = 360 - max_gap
+    """
+    names = list(pos.keys())
+    if len(names) < 3:
+        return ("(too few bodies)", {})
+
+    lons = sorted((pos[n], n) for n in names)
+    gaps = []
+    for i in range(len(lons)):
+        lon1, _ = lons[i]
+        lon2, _ = lons[(i + 1) % len(lons)]
+        gap = (lon2 - lon1) % 360.0
+        gaps.append(gap)
+
+    max_gap = max(gaps)
+    max_i = gaps.index(max_gap)
+    span = 360.0 - max_gap
+
+    # 最大ギャップの後から始めると「最小スパン区間」になる
+    start_idx = (max_i + 1) % len(lons)
+    ordered = lons[start_idx:] + lons[:start_idx]
+
+    info = {
+        "span_deg": round(span, 2),
+        "max_gap_deg": round(max_gap, 2),
+        "bodies": [n for _, n in ordered],
+    }
+
+    # 判定（目安）
+    # Bundle: 120°以内
+    if span <= 120:
+        return ("Bundle (集中)", info)
+
+    # Bowl/Bucket/Locomotive: 180°〜240° くらいが多い
+    if 120 < span <= 180:
+        # Bowl寄り
+        # Bucket: 1天体だけ“取っ手”っぽく離れる（隣接ギャップが大きい）
+        # ここでは「最大ギャップ以外にも大きいギャップ(>=30°)が1つある」等で雑判定
+        big_gaps = sum(1 for g in gaps if g >= 30)
+        if big_gaps >= 2:
+            return ("Bucket-ish (ボウル＋取っ手っぽい)", info)
+        return ("Bowl (半分に偏る)", info)
+
+    if 180 < span <= 240:
+        # Locomotive: 240°以内に収まり、空白が 60°以上
+        if max_gap >= 60:
+            return ("Locomotive (機関車型)", info)
+        return ("Bowl-ish (広め)", info)
+
+    # Seesaw: 大きいギャップが複数（2クラスター）
+    big_gaps = [g for g in gaps if g >= 60]
+    if len(big_gaps) >= 2:
+        return ("Seesaw (シーソー/二極)", info)
+
+    # Splash: 全体に散る＆最大ギャップが小さい
+    if span > 240 and max_gap < 60:
+        return ("Splash (散開)", info)
+
+    return ("(no strong distribution pattern)", info)
+
+def detect_chart_patterns(longitudes: dict, enabled_names: list[str], major_orb: float, minor_orb: float):
+    """
+    まとめて検出して dict で返す。
+    major_orb: メジャー（0/60/90/120/180）
+    minor_orb: マイナー（30/45/72/135/144/150）
+    """
+    pos = _get_positions(longitudes, enabled_names)
+
+    # 何もない時の安全策
+    if len(pos) < 3:
+        return {"_pos_count": len(pos), "note": "too few bodies"}
+
+    gtr = detect_grand_trines(pos, orb_trine=major_orb)
+    tsq = detect_t_squares(pos, orb_opp=major_orb, orb_sq=major_orb)
+    gcx = detect_grand_crosses(pos, orb_opp=major_orb, orb_sq=major_orb)
+    kit = detect_kites(pos, gtr, orb_opp=major_orb, orb_sex=major_orb)
+    mrx = detect_mystic_rectangles(pos, orb_opp=major_orb, orb_trine=major_orb, orb_sex=major_orb)
+
+    yod = detect_yods(pos, orb_sex=major_orb, orb_quinc=minor_orb)
+    boo = detect_boomerangs(pos, yod, orb_opp=major_orb)
+
+    gyd = detect_golden_yods(pos, orb_quint=minor_orb, orb_biquint=minor_orb)
+    thh = detect_thors_hammers(pos, orb_sq=major_orb, orb_sesqui=minor_orb)
+
+    gsx = detect_grand_sextiles(pos, orb_sex=major_orb, orb_tri=major_orb, orb_opp=major_orb)
+
+    # Stellium: span は少し広めでも良いので（好みで調整）
+    stellium = detect_stelliums(pos, min_bodies=3, max_span_deg=max(8.0, major_orb * 2))
+
+    dist_name, dist_info = detect_distribution_pattern(pos)
+
+    return {
+        "_pos_count": len(pos),
+        "GrandTrine": gtr,
+        "Kite": kit,
+        "TSquare": tsq,
+        "GrandCross": gcx,
+        "MysticRectangle": mrx,
+        "Yod": yod,
+        "Boomerang": boo,
+        "GoldenYod": gyd,
+        "ThorsHammer": thh,
+        "GrandSextile": gsx,
+        "Stellium": stellium,
+        "Distribution": (dist_name, dist_info),
+    }
+
+def print_chart_patterns(patterns: dict):
+    print("\n=== Chart Patterns (AUTO DETECT) ===")
+    if not patterns or patterns.get("_pos_count", 0) < 3:
+        print("  (too few bodies)")
+        return
+
+    def _print_list(title, items, fmt=None):
+        if not items:
+            return
+        print(f"\n-- {title} ({len(items)}) --")
+        for it in items:
+            if fmt:
+                print("  " + fmt(it))
+            else:
+                print("  " + ", ".join(it))
+
+    _print_list("Grand Trine", patterns.get("GrandTrine"))
+    _print_list("Kite", patterns.get("Kite"),
+                fmt=lambda t: f"GT[{', '.join(t[:3])}] + D={t[3]} opposite focus={t[4]}")
+    _print_list("T-Square", patterns.get("TSquare"),
+                fmt=lambda t: f"base={t[0]}-{t[1]} (opp), apex={t[2]}")
+    _print_list("Grand Cross", patterns.get("GrandCross"))
+    _print_list("Mystic Rectangle", patterns.get("MysticRectangle"))
+    _print_list("Yod", patterns.get("Yod"),
+                fmt=lambda t: f"base={t[0]}-{t[1]} (sextile), apex={t[2]} (quincunx×2)")
+    _print_list("Boomerang (Yod + opp apex)", patterns.get("Boomerang"),
+                fmt=lambda t: f"base={t[0]}-{t[1]}, apex={t[2]}, opp_apex={t[3]}")
+    _print_list("Golden Yod (Quintile Yod)", patterns.get("GoldenYod"),
+                fmt=lambda t: f"base={t[0]}-{t[1]} (biquintile), apex={t[2]} (quintile×2)")
+    _print_list("Thor's Hammer", patterns.get("ThorsHammer"),
+                fmt=lambda t: f"base={t[0]}-{t[1]} (square), apex={t[2]} (sesqui×2)")
+    _print_list("Grand Sextile (Star of David)", patterns.get("GrandSextile"))
+
+    # Stellium
+    stell = patterns.get("Stellium", [])
+    if stell:
+        print(f"\n-- Stellium (>=3 in tight span) ({len(stell)}) --")
+        for t in stell:
+            print("  " + ", ".join(t))
+
+    # Distribution
+    dist = patterns.get("Distribution")
+    if dist:
+        name, info = dist
+        print("\n-- Distribution (rough) --")
+        print(f"  {name}")
+        if isinstance(info, dict) and info:
+            print(f"  span={info.get('span_deg')}° max_gap={info.get('max_gap_deg')}°")
+            # bodies list は長いので、欲しければコメントアウト外してね
+            # print("  bodies:", ", ".join(info.get("bodies", [])))
+
+    # 何も出なかったとき
+    any_found = False
+    for k, v in patterns.items():
+        if k.startswith("_") or k == "Distribution":
+            continue
+        if v:
+            any_found = True
+            break
+    if not any_found and not stell:
+        print("  (none found with current orbs)")
 
 # ============================================================
 # 場所解決（地名 → 緯度経度 → タイムゾーン）
@@ -580,6 +1124,12 @@ class AstroApp:
         else:
             for n1, n2, asp_name, asp_deg, delta in minor_hits:
                 print(f"  {n1:8s} {fmt_aspect_name(asp_name):18s} {n2:8s} | exact {asp_deg:3d}° | orb {fmt_orb(delta)}")
+        
+        # =====================
+        # コンソール出力：チャートパターン（追加）
+        # =====================
+        patterns = detect_chart_patterns(self.longitudes, enabled, major_orb, minor_orb)
+        print_chart_patterns(patterns)
 
         self.redraw()
 
