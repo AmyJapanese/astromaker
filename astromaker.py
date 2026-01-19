@@ -810,6 +810,41 @@ def compute_planet_longitudes(jd_ut: float, body_map: dict[str, int], flags: int
             print(f"[warn] {name}: calc_ut failed ({e}).")
     return out
 
+def compute_retrograde_flags(jd_ut: float, body_map: dict[str, int],
+                             flags: int, delta_days: float = 1.0) -> dict[str, bool | None]:
+    """
+    前後比較による逆行判定
+    - True  : 逆行
+    - False : 順行
+    - None  : 判定不能
+    """
+    out: dict[str, bool | None] = {}
+
+    jd_next = jd_ut + delta_days
+
+    for name, body_id in body_map.items():
+        if body_id is None:
+            out[name] = None
+            continue
+
+        try:
+            xx0, _ = swe.calc_ut(jd_ut, body_id, flags)
+            xx1, _ = swe.calc_ut(jd_next, body_id, flags)
+
+            lon0 = norm360(float(xx0[0]))
+            lon1 = norm360(float(xx1[0]))
+
+            # 360度跨ぎ対策
+            diff = (lon1 - lon0 + 540.0) % 360.0 - 180.0
+
+            out[name] = diff < 0.0
+
+        except Exception as e:
+            print(f"[warn] {name}: retrograde check failed ({e}).")
+            out[name] = None
+
+    return out
+
 def compute_houses_and_axes(jd_ut, lat, lon, hsys="P"):
     if isinstance(hsys, str):
         hsys = hsys.encode("ascii")
@@ -1051,6 +1086,11 @@ class AstroApp:
 
         # 天体経度
         self.longitudes = compute_planet_longitudes(jd_ut, self.body_ids, self.flags_pos)
+        
+        # 天体逆行フラグ
+        self.retrogrades = compute_retrograde_flags(
+        jd_ut, self.body_ids, self.flags_pos
+        )
 
         # ハウス＆軸（Equal）
         self.axes, self.house_cusps = compute_houses_and_axes(jd_ut, lat, lon, hsys="P")
@@ -1073,12 +1113,18 @@ class AstroApp:
         ac = self.axes["ASC"]
         for name in self.body_ids.keys():
             lonv = self.longitudes.get(name)
+            retro = self.retrogrades.get(name)
+
+            rx = " ℞" if retro else ""
+
             if lonv is None:
-                print(f"{name:8s} | (missing)                 | House -- | Lon   --")
+                print(f"{name:8s} | (missing){rx:3s}              | House -- | Lon   --")
                 continue
+
             sign_str = deg_to_sign_string(lonv)
             house = lon_to_house_equal(lonv, ac)
-            print(f"{name:8s} | {sign_str:25s} | House {house:2d} | Lon {lonv:7.2f}°")
+
+            print(f"{name:8s} | {sign_str:25s}{rx:3s} | House {house:2d} | Lon {lonv:7.2f}°")
 
         print("\n=== Axes (ecliptic longitude) ===")
         for k in ["ASC", "DSC", "MC", "IC"]:
