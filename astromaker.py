@@ -100,13 +100,15 @@ def lon_to_house_equal(lon_deg: float, ac_deg: float) -> int:
     rel = (lon_deg - ac_deg) % 360
     return int(rel // 30) + 1
 
-def make_whole_sign_cusps(asc_deg: float) -> list[float]:
+def choose_house_system(lat: float) -> tuple[str, str]:
     """
-    Whole Sign Houses:
-    ASC が属するサインを第1ハウスの開始にする
+    緯度に応じてハウスシステムを選択
+    戻り値: (hsys_code, label)
     """
-    sign_start = (int(asc_deg // 30) * 30) % 360
-    return [norm360(sign_start + i * 30) for i in range(12)]
+    if abs(lat) >= 60.0:
+        return "O", "Porphyry (auto: high latitude)"
+    else:
+        return "P", "Placidus"
 
 # ============================================================
 # アスペクト（メジャー/マイナー）
@@ -1100,27 +1102,20 @@ class AstroApp:
         jd_ut, self.body_ids, self.flags_pos
         )
 
-        # =====================
+        # ハウス方式の自動選択
+        hsys_code, hsys_label = choose_house_system(lat)
+
         # ハウス＆軸
-        # =====================
-        HIGH_LAT_LIMIT = 60.0
-
-        if abs(lat) >= HIGH_LAT_LIMIT:
-            # 高緯度 → Whole Sign
-            self.axes, _ = compute_houses_and_axes(jd_ut, lat, lon, hsys="O")  # 軸だけ使う
-            self.house_cusps = make_whole_sign_cusps(self.axes["ASC"])
-            self.house_system = "Whole"
-            print("[info] High latitude detected. Switched house system to Whole Sign.")
-        else:
-            # 通常 → Placidus
-            self.axes, self.house_cusps = compute_houses_and_axes(jd_ut, lat, lon, hsys="P")
-            self.house_system = "Placidus"
-
-        # extras（ノード/PoF/Vertex/Lilith/Selena）
-        self.extras = compute_extra_points(
-            jd_ut=jd_ut, lon=lon, lat=lat, elev_m=self.ctx.elev_m,
-            axes=self.axes, longitudes=self.longitudes, flags_pos=self.flags_pos
+        self.axes, self.house_cusps = compute_houses_and_axes(
+            jd_ut, lat, lon, hsys=hsys_code
         )
+
+        # 表示用に保持
+        self.house_system_label = hsys_label
+        
+        print("\n=== House System ===")
+        print(self.house_system_label)
+
 
         # =====================
         # コンソール出力
