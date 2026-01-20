@@ -1107,7 +1107,7 @@ class AstroApp:
 
         if abs(lat) >= HIGH_LAT_LIMIT:
             # 高緯度 → Whole Sign
-            self.axes, _ = compute_houses_and_axes(jd_ut, lat, lon, hsys="E")  # 軸だけ使う
+            self.axes, _ = compute_houses_and_axes(jd_ut, lat, lon, hsys="O")  # 軸だけ使う
             self.house_cusps = make_whole_sign_cusps(self.axes["ASC"])
             self.house_system = "Whole"
             print("[info] High latitude detected. Switched house system to Whole Sign.")
