@@ -100,6 +100,14 @@ def lon_to_house_equal(lon_deg: float, ac_deg: float) -> int:
     rel = (lon_deg - ac_deg) % 360
     return int(rel // 30) + 1
 
+def make_whole_sign_cusps(asc_deg: float) -> list[float]:
+    """
+    Whole Sign Houses:
+    ASC が属するサインを第1ハウスの開始にする
+    """
+    sign_start = (int(asc_deg // 30) * 30) % 360
+    return [norm360(sign_start + i * 30) for i in range(12)]
+
 # ============================================================
 # アスペクト（メジャー/マイナー）
 # ============================================================
@@ -1092,8 +1100,21 @@ class AstroApp:
         jd_ut, self.body_ids, self.flags_pos
         )
 
-        # ハウス＆軸（Equal）
-        self.axes, self.house_cusps = compute_houses_and_axes(jd_ut, lat, lon, hsys="P")
+        # =====================
+        # ハウス＆軸
+        # =====================
+        HIGH_LAT_LIMIT = 60.0
+
+        if abs(lat) >= HIGH_LAT_LIMIT:
+            # 高緯度 → Whole Sign
+            self.axes, _ = compute_houses_and_axes(jd_ut, lat, lon, hsys="E")  # 軸だけ使う
+            self.house_cusps = make_whole_sign_cusps(self.axes["ASC"])
+            self.house_system = "Whole"
+            print("[info] High latitude detected. Switched house system to Whole Sign.")
+        else:
+            # 通常 → Placidus
+            self.axes, self.house_cusps = compute_houses_and_axes(jd_ut, lat, lon, hsys="P")
+            self.house_system = "Placidus"
 
         # extras（ノード/PoF/Vertex/Lilith/Selena）
         self.extras = compute_extra_points(
