@@ -1093,6 +1093,34 @@ class AstroApp:
         jd_ut = self.ctx.jd_ut
         lon = self.ctx.info.lon
         lat = self.ctx.info.lat
+        self.extras = {}
+
+        jd_ut = self.ctx.jd_ut
+        lon = self.ctx.info.lon
+        lat = self.ctx.info.lat
+
+        # ② 天体
+        self.longitudes = compute_planet_longitudes(
+            jd_ut, self.body_ids, self.flags_pos
+        )
+
+        # ③ ハウス＆軸
+        hsys_code, hsys_label = choose_house_system(lat)
+        self.axes, self.house_cusps = compute_houses_and_axes(
+            jd_ut, lat, lon, hsys=hsys_code
+        )
+        self.house_system_label = hsys_label
+
+        # ④ extras
+        self.extras = compute_extra_points(
+            jd_ut=jd_ut,
+            lon=lon,
+            lat=lat,
+            elev_m=self.ctx.elev_m,
+            axes=self.axes,
+            longitudes=self.longitudes,
+            flags_pos=self.flags_pos
+        )
 
         # 天体経度
         self.longitudes = compute_planet_longitudes(jd_ut, self.body_ids, self.flags_pos)
