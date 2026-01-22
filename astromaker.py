@@ -163,6 +163,25 @@ DEFAULT_MAJOR_ORB_DEG = 6.0
 DEFAULT_MINOR_ORB_DEG = 2.0
 
 # ============================================================
+# 除外ルール：特定ペアの Opposition（180°）は「無いもの」として扱う
+#  - ASC & DSC
+#  - MC  & IC
+#  - NorthNode & SouthNode
+#  - Lilith & Selena
+# ============================================================
+EXCLUDED_OPPOSITION_PAIRS = {
+    frozenset(("ASC", "DSC")),
+    frozenset(("MC", "IC")),
+    frozenset(("NorthNode", "SouthNode")),
+    frozenset(("Lilith", "Selena")),
+}
+
+AXES_MAIN = {"ASC", "DSC", "MC", "IC"}
+
+def is_excluded_opposition_pair(n1: str, n2: str) -> bool:
+    return frozenset((n1, n2)) in EXCLUDED_OPPOSITION_PAIRS
+
+# ============================================================
 # チャートパターン検出（コンソール用）
 # ============================================================
 
@@ -217,6 +236,8 @@ def detect_t_squares(pos: dict[str, float], orb_opp: float, orb_sq: float):
     names = list(pos.keys())
     for a, b in combinations(names, 2):
         ok_opp, d_opp, _ = _hit(pos[a], pos[b], 180, orb_opp)
+        if ok_opp and is_excluded_opposition_pair(a, b):
+            ok_opp = False
         if not ok_opp:
             continue
         for c in names:
@@ -254,6 +275,12 @@ def detect_grand_crosses(pos: dict[str, float], orb_opp: float, orb_sq: float):
         ok = True
         for x, y in pair:
             ok_opp, d_opp, _ = _hit(pos[x], pos[y], 180, orb_opp)
+            if ok_opp and is_excluded_opposition_pair(x, y):
+                ok_opp = False
+            if ok_opp and is_excluded_opposition_pair(x, y):
+                ok_opp = False
+            if ok_opp and is_excluded_opposition_pair(x, y):
+                ok_opp = False
             ok_sq, d_sq, _ = _hit(pos[x], pos[y], 90, orb_sq)
             if ok_opp:
                 opp += 1
@@ -285,6 +312,8 @@ def detect_kites(pos: dict[str, float], grand_trines: list[tuple[str, str, str]]
                 if d in tri:
                     continue
                 ok_opp, d_opp, _ = _hit(pos[d], pos[focus], 180, orb_opp)
+                if ok_opp and is_excluded_opposition_pair(d, focus):
+                    ok_opp = False
                 if not ok_opp:
                     continue
                 ok_s1, d1, _ = _hit(pos[d], pos[others[0]], 60, orb_sex)
@@ -379,6 +408,8 @@ def detect_boomerangs(pos: dict[str, float], yods: list[tuple[str, str, str]], o
             if d in (a, b, apex):
                 continue
             ok_opp, d_opp, _ = _hit(pos[d], pos[apex], 180, orb_opp)
+            if ok_opp and is_excluded_opposition_pair(d, apex):
+                ok_opp = False
             if ok_opp:
                 hits.append((d_opp, a, b, apex, d))
     hits.sort(key=lambda x: x[0])
@@ -611,6 +642,8 @@ def detect_chart_patterns(longitudes: dict, enabled_names: list[str], major_orb:
     gtr = detect_grand_trines(pos, orb_trine=major_orb)
     tsq = detect_t_squares(pos, orb_opp=major_orb, orb_sq=major_orb)
     gcx = detect_grand_crosses(pos, orb_opp=major_orb, orb_sq=major_orb)
+    # 軸4つ(ASC/DSC/MC/IC)だけで作られるグランドクロスは除外
+    gcx = [t for t in gcx if set(t) != AXES_MAIN]
     kit = detect_kites(pos, gtr, orb_opp=major_orb, orb_sex=major_orb)
     mrx = detect_mystic_rectangles(pos, orb_opp=major_orb, orb_trine=major_orb, orb_sex=major_orb)
 
@@ -776,6 +809,9 @@ def find_aspects(longitudes, enabled_names, aspect_dict, orb_deg):
 
             best = None
             for asp_name, asp_deg in aspect_dict.items():
+                # 特定ペアの Opposition は除外
+                if asp_deg == 180 and is_excluded_opposition_pair(n1, n2):
+                    continue
                 delta = abs(sep - asp_deg)
                 if delta <= orb_deg:
                     if (best is None) or (delta < best[-1]):
@@ -1037,6 +1073,20 @@ class AstroApp:
         ttk.Separator(self.left).pack(fill="x", pady=8)
 
         # ---------------------
+        # 表示トグル（計算点 / ノードなど）
+        # ---------------------
+        ttk.Label(self.left, text="表示する計算点", font=("", 11, "bold")).pack(anchor="w", pady=(0, 6))
+
+        self.extra_point_names = ["NorthNode", "SouthNode", "PoF", "Lilith", "Selena", "Vertex"]
+        self.extra_vars = {}
+        for name in self.extra_point_names:
+            var = tk.BooleanVar(value=True)
+            self.extra_vars[name] = var
+            ttk.Checkbutton(self.left, text=name, variable=var, command=self.redraw).pack(anchor="w")
+
+        ttk.Separator(self.left).pack(fill="x", pady=8)
+
+        # ---------------------
         # 表示トグル（グリッド）
         # ---------------------
         ttk.Label(self.left, text="グリッド表示", font=("", 11, "bold")).pack(anchor="w", pady=(0, 6))
@@ -1138,6 +1188,17 @@ class AstroApp:
             jd_ut, lat, lon, hsys=hsys_code
         )
 
+        # extras（最終的な longitudes / axes に揃えて再計算）
+        self.extras = compute_extra_points(
+            jd_ut=jd_ut,
+            lon=lon,
+            lat=lat,
+            elev_m=self.ctx.elev_m,
+            axes=self.axes,
+            longitudes=self.longitudes,
+            flags_pos=self.flags_pos
+        )
+
         # 表示用に保持
         self.house_system_label = hsys_label
         
@@ -1190,12 +1251,45 @@ class AstroApp:
         # =====================
         # コンソール出力：アスペクト
         # =====================
-        enabled = [n for n in self.body_ids.keys() if self.body_vars[n].get() and self.longitudes.get(n) is not None]
+        # =====================
+        # アスペクト/パターン判定用：惑星 + 軸 + 計算点
+        # =====================
+        self.all_longitudes = dict(self.longitudes)
+
+        # Axes / Angles
+        for k in ["ASC", "DSC", "MC", "IC", "Vertex"]:
+            self.all_longitudes[k] = self.axes.get(k)
+
+        # Extras（IsDayChart は角度ではないので除外）
+        for k in self.extra_point_names:
+            v = self.extras.get(k)
+            self.all_longitudes[k] = (float(v) % 360.0) if isinstance(v, (int, float)) and v is not None else None
+
+        enabled = []
+
+        # planets（チェックボックスに従う）
+        for n in self.body_ids.keys():
+            if self.body_vars[n].get() and self.all_longitudes.get(n) is not None:
+                enabled.append(n)
+
+        # axes（常に含める）
+        for n in ["ASC", "DSC", "MC", "IC", "Vertex"]:
+            if self.all_longitudes.get(n) is not None:
+                enabled.append(n)
+
+        # extras（チェックボックスに従う）
+        for n in self.extra_point_names:
+            if self.extra_vars.get(n).get() and self.all_longitudes.get(n) is not None:
+                enabled.append(n)
+
+        # 重複除去（順序維持）
+        enabled = list(dict.fromkeys(enabled))
+
         major_orb = float(self.major_orb_var.get())
         minor_orb = float(self.minor_orb_var.get())
 
-        major_hits = find_aspects(self.longitudes, enabled, MAJOR_ASPECTS, orb_deg=major_orb)
-        minor_hits = find_aspects(self.longitudes, enabled, MINOR_ASPECTS, orb_deg=minor_orb)
+        major_hits = find_aspects(self.all_longitudes, enabled, MAJOR_ASPECTS, orb_deg=major_orb)
+        minor_hits = find_aspects(self.all_longitudes, enabled, MINOR_ASPECTS, orb_deg=minor_orb)
         major_hits.sort(key=lambda t: t[-1])
         minor_hits.sort(key=lambda t: t[-1])
 
@@ -1218,7 +1312,7 @@ class AstroApp:
         # =====================
         # コンソール出力：チャートパターン（追加）
         # =====================
-        patterns = detect_chart_patterns(self.longitudes, enabled, major_orb, minor_orb)
+        patterns = detect_chart_patterns(self.all_longitudes, enabled, major_orb, minor_orb)
         print_chart_patterns(patterns)
 
         self.redraw()
@@ -1263,24 +1357,41 @@ class AstroApp:
 
         # アスペクト線
         if self.show_aspects.get():
-            enabled = [n for n in self.body_ids.keys() if self.body_vars[n].get() and self.longitudes.get(n) is not None]
+            enabled = []
+
+            # planets（チェックボックス）
+            for n in self.body_ids.keys():
+                if self.body_vars[n].get() and self.all_longitudes.get(n) is not None:
+                    enabled.append(n)
+
+            # axes（常に）
+            for n in ["ASC", "DSC", "MC", "IC", "Vertex"]:
+                if self.all_longitudes.get(n) is not None:
+                    enabled.append(n)
+
+            # extras（チェックボックス）
+            for n in self.extra_point_names:
+                if self.extra_vars.get(n).get() and self.all_longitudes.get(n) is not None:
+                    enabled.append(n)
+
+            enabled = list(dict.fromkeys(enabled))
             r_aspect = 0.65
 
             major_orb = float(self.major_orb_var.get())
-            major_hits = find_aspects(self.longitudes, enabled, MAJOR_ASPECTS, orb_deg=major_orb)
+            major_hits = find_aspects(self.all_longitudes, enabled, MAJOR_ASPECTS, orb_deg=major_orb)
             for n1, n2, asp_name, asp_deg, delta in major_hits:
-                a1 = deg_to_rad(self.longitudes[n1])
-                a2 = deg_to_rad(self.longitudes[n2])
+                a1 = deg_to_rad(self.all_longitudes[n1])
+                a2 = deg_to_rad(self.all_longitudes[n2])
                 color = ASPECT_COLORS.get(asp_name, "gray")
                 self.ax.plot([a1, a2], [r_aspect, r_aspect],
                              linewidth=1.3, color=color, alpha=0.9, zorder=2)
 
             if self.show_minor_aspects.get():
                 minor_orb = float(self.minor_orb_var.get())
-                minor_hits = find_aspects(self.longitudes, enabled, MINOR_ASPECTS, orb_deg=minor_orb)
+                minor_hits = find_aspects(self.all_longitudes, enabled, MINOR_ASPECTS, orb_deg=minor_orb)
                 for n1, n2, asp_name, asp_deg, delta in minor_hits:
-                    a1 = deg_to_rad(self.longitudes[n1])
-                    a2 = deg_to_rad(self.longitudes[n2])
+                    a1 = deg_to_rad(self.all_longitudes[n1])
+                    a2 = deg_to_rad(self.all_longitudes[n2])
                     color = ASPECT_COLORS.get(asp_name, "gray")
                     self.ax.plot([a1, a2], [r_aspect, r_aspect],
                                  linewidth=0.9, color=color, alpha=0.55, zorder=1)
@@ -1295,6 +1406,17 @@ class AstroApp:
             ang = deg_to_rad(lonv)
             self.ax.scatter([ang], [1.00], s=40, zorder=5)
             self.ax.text(ang, 1.05, name, ha="center", va="center", fontsize=9)
+
+        # 計算点プロット（ノード/リリス/セレナ/PoF/Vertex）
+        for name in self.extra_point_names:
+            if not self.extra_vars.get(name).get():
+                continue
+            lonv = self.all_longitudes.get(name)
+            if lonv is None:
+                continue
+            ang = deg_to_rad(lonv)
+            self.ax.scatter([ang], [0.92], s=28, zorder=5)
+            self.ax.text(ang, 0.97, name, ha="center", va="center", fontsize=8)
 
         self.canvas.draw()
 
