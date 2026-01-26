@@ -100,15 +100,56 @@ def lon_to_house_equal(lon_deg: float, ac_deg: float) -> int:
     rel = (lon_deg - ac_deg) % 360
     return int(rel // 30) + 1
 
-def choose_house_system(lat: float) -> tuple[str, str]:
+def lon_to_house_by_cusps(lon_deg: float, house_cusps: list[float]) -> int:
     """
-    緯度に応じてハウスシステムを選択
+    ハウスカスプ（1〜12）から、指定経度が属するハウス番号を返す。
+    house_cusps は 1始まり想定だが、このコード内では [0..11] の 12要素でも動くようにする。
+
+    ※ SwissEph の cusps は「1始まり・13要素（index 1..12 が有効、0 はダミー）」が来ることが多い。
+    """
+    if not house_cusps:
+        return 1
+
+    cusps = house_cusps[1:] if len(house_cusps) >= 13 else list(house_cusps)
+    if len(cusps) < 12:
+        cusps = (cusps + [cusps[-1]] * 12)[:12]
+
+    lon = lon_deg % 360.0
+    for i in range(12):
+        a = cusps[i] % 360.0
+        b = cusps[(i + 1) % 12] % 360.0
+        if a <= b:
+            if a <= lon < b:
+                return i + 1
+        else:
+            if lon >= a or lon < b:
+                return i + 1
+    return 12
+
+HOUSE_SYSTEM_CHOICES = {
+    "Auto": None,
+    "Placidus": "P",
+    "Porphyry": "O",
+    "Regiomontanus": "R",
+}
+
+def choose_house_system(lat: float, choice: str = "Auto") -> tuple[str, str]:
+    """
+    緯度に応じてハウスシステムを選択（またはユーザー指定を優先）
     戻り値: (hsys_code, label)
+
+    - Auto: 高緯度(>=60°)なら Porphyry、それ以外は Placidus
+    - Regiomontanus: 'R'
     """
+    choice = (choice or "Auto").strip()
+    code = HOUSE_SYSTEM_CHOICES.get(choice, None)
+
+    if code:
+        return code, choice
+
     if abs(lat) >= 60.0:
         return "O", "Porphyry (auto: high latitude)"
-    else:
-        return "P", "Placidus"
+    return "P", "Placidus"
 
 # ============================================================
 # アスペクト（メジャー/マイナー）
@@ -1045,8 +1086,25 @@ class AstroApp:
         self.show_axes = tk.BooleanVar(value=True)
 
         ttk.Checkbutton(self.left, text="星座(12分割)", variable=self.show_zodiac, command=self.redraw).pack(anchor="w")
-        ttk.Checkbutton(self.left, text="ハウス(Equal)", variable=self.show_houses, command=self.redraw).pack(anchor="w")
+        ttk.Checkbutton(self.left, text="ハウス(選択方式)", variable=self.show_houses, command=self.redraw).pack(anchor="w")
         ttk.Checkbutton(self.left, text="軸(AC/DC/MC/IC)", variable=self.show_axes, command=self.redraw).pack(anchor="w")
+        # ---------------------
+        # ハウス方式（SwissEph）
+        # ---------------------
+        ttk.Separator(self.left).pack(fill="x", pady=8)
+        ttk.Label(self.left, text="ハウス方式", font=("", 11, "bold")).pack(anchor="w", pady=(0, 6))
+
+        self.house_choice_var = tk.StringVar(value="Auto")
+        self.house_choice = ttk.Combobox(
+            self.left,
+            textvariable=self.house_choice_var,
+            values=list(HOUSE_SYSTEM_CHOICES.keys()),
+            state="readonly",
+            width=18,
+        )
+        self.house_choice.pack(anchor="w")
+        self.house_choice.bind("<<ComboboxSelected>>", lambda _e: self.recalc_and_redraw())
+
 
         # ---------------------
         # アスペクト表示（メジャー + マイナー）
@@ -1093,22 +1151,17 @@ class AstroApp:
         jd_ut = self.ctx.jd_ut
         lon = self.ctx.info.lon
         lat = self.ctx.info.lat
-        self.extras = {}
 
-        jd_ut = self.ctx.jd_ut
-        lon = self.ctx.info.lon
-        lat = self.ctx.info.lat
+        # ① 天体
+        self.longitudes = compute_planet_longitudes(jd_ut, self.body_ids, self.flags_pos)
 
-        # ② 天体
-        self.longitudes = compute_planet_longitudes(
-            jd_ut, self.body_ids, self.flags_pos
-        )
+        # ② 天体逆行フラグ
+        self.retrogrades = compute_retrograde_flags(jd_ut, self.body_ids, self.flags_pos)
 
-        # ③ ハウス＆軸
-        hsys_code, hsys_label = choose_house_system(lat)
-        self.axes, self.house_cusps = compute_houses_and_axes(
-            jd_ut, lat, lon, hsys=hsys_code
-        )
+        # ③ ハウス＆軸（選択方式）
+        choice = self.house_choice_var.get() if hasattr(self, "house_choice_var") else "Auto"
+        hsys_code, hsys_label = choose_house_system(lat, choice=choice)
+        self.axes, self.house_cusps = compute_houses_and_axes(jd_ut, lat, lon, hsys=hsys_code)
         self.house_system_label = hsys_label
 
         # ④ extras
@@ -1122,43 +1175,18 @@ class AstroApp:
             flags_pos=self.flags_pos
         )
 
-        # 天体経度
-        self.longitudes = compute_planet_longitudes(jd_ut, self.body_ids, self.flags_pos)
-        
-        # 天体逆行フラグ
-        self.retrogrades = compute_retrograde_flags(
-        jd_ut, self.body_ids, self.flags_pos
-        )
-
-        # ハウス方式の自動選択
-        hsys_code, hsys_label = choose_house_system(lat)
-
-        # ハウス＆軸
-        self.axes, self.house_cusps = compute_houses_and_axes(
-            jd_ut, lat, lon, hsys=hsys_code
-        )
-
-        # 表示用に保持
-        self.house_system_label = hsys_label
-        
         print("\n=== House System ===")
         print(self.house_system_label)
 
-
-        # =====================
-        # コンソール出力
-        # =====================
         print("\n=== Location / Time ===")
         print(self.ctx.info)
         print("UTC:", self.ctx.dt_utc.isoformat())
         print("JD(UT):", jd_ut)
 
         print("\n=== Planet positions (sign / house / longitude) ===")
-        ac = self.axes["ASC"]
         for name in self.body_ids.keys():
             lonv = self.longitudes.get(name)
             retro = self.retrogrades.get(name)
-
             rx = " ℞" if retro else ""
 
             if lonv is None:
@@ -1166,8 +1194,7 @@ class AstroApp:
                 continue
 
             sign_str = deg_to_sign_string(lonv)
-            house = lon_to_house_equal(lonv, ac)
-
+            house = lon_to_house_by_cusps(lonv, self.house_cusps)
             print(f"{name:8s} | {sign_str:25s}{rx:3s} | House {house:2d} | Lon {lonv:7.2f}°")
 
         print("\n=== Axes (ecliptic longitude) ===")
@@ -1182,14 +1209,12 @@ class AstroApp:
             if lonv is None:
                 print(f"{k:9s} | (missing)                 | House -- | Lon   --")
                 continue
-            print(f"{k:9s} | {deg_to_sign_string(lonv):25s} | House {lon_to_house_equal(lonv, ac):2d} | Lon {lonv:7.2f}°")
+            house = lon_to_house_by_cusps(lonv, self.house_cusps)
+            print(f"{k:9s} | {deg_to_sign_string(lonv):25s} | House {house:2d} | Lon {lonv:7.2f}°")
         print("Day chart?", self.extras.get("IsDayChart"))
 
         self.date_label.config(text=self.ctx.dt_utc.isoformat(timespec="seconds"))
 
-        # =====================
-        # コンソール出力：アスペクト
-        # =====================
         enabled = [n for n in self.body_ids.keys() if self.body_vars[n].get() and self.longitudes.get(n) is not None]
         major_orb = float(self.major_orb_var.get())
         minor_orb = float(self.minor_orb_var.get())
@@ -1214,10 +1239,7 @@ class AstroApp:
         else:
             for n1, n2, asp_name, asp_deg, delta in minor_hits:
                 print(f"  {n1:8s} {fmt_aspect_name(asp_name):18s} {n2:8s} | exact {asp_deg:3d}° | orb {fmt_orb(delta)}")
-        
-        # =====================
-        # コンソール出力：チャートパターン（追加）
-        # =====================
+
         patterns = detect_chart_patterns(self.longitudes, enabled, major_orb, minor_orb)
         print_chart_patterns(patterns)
 
@@ -1245,7 +1267,7 @@ class AstroApp:
                 self.ax.text(deg_to_rad(label_deg), 1.10, SIGN_SYMBOLS[i],
                              ha="center", va="center", fontsize=12)
 
-        # ハウス（Equal, AC基準）
+        # ハウス（選択方式）
         if self.show_houses.get():
             for i, cusp_deg in enumerate(self.house_cusps):
                 draw_radial_line(self.ax, cusp_deg, r0=0.0, r1=1.0, lw=1.0, color="dimgray")
