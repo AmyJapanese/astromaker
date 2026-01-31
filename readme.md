@@ -29,9 +29,10 @@ Pythonで動作する西洋占星術ホロスコープ作成ツールです。
 - `zoneinfo`（Python標準）
 - `geopy`
 - `timezonefinder`
+- `tzdata`
 
 ```bash
-pip install pyswisseph matplotlib geopy timezonefinder
+pip install pyswisseph matplotlib geopy timezonefinder tzdata
 ````
 
 ### pyswisseph のインストールについて
