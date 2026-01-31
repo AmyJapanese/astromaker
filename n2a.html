@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Excel列変換</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+    }
+    input {
+      width: 120px;
+      font-size: 16px;
+    }
+    button {
+      margin-left: 8px;
+      font-size: 14px;
+    }
+    #result {
+      margin-top: 12px;
+      font-size: 18px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>数値 → Excel列</h2>
+
+  <input type="number" id="num" placeholder="例: 27" onkeydown="handleEnter(event)">
+  <button onclick="convert()">変換</button>
+  <button onclick="copy()">コピー</button>
+
+  <div id="result"></div>
+
+  <script>
+    function numberToExcel(n) {
+      let result = "";
+      while (n > 0) {
+        result = String.fromCharCode(65 + (n % 26)) + result;
+        n = Math.floor(n / 26);
+      }
+      return result;
+    }
+
+    function convert() {
+      const n = Number(document.getElementById("num").value);
+      if (n <= 0) {
+        document.getElementById("result").textContent = "正の数を入れてね";
+        return;
+      }
+      document.getElementById("result").textContent = numberToExcel(n);
+    }
+
+    function copy() {
+      const text = document.getElementById("result").textContent;
+      if (!text) return;
+      navigator.clipboard.writeText(text);
+      alert("コピーしたよ！");
+    }
+    function handleEnter(e) {
+        if (e.key === "Enter") {
+            convert();
+        }
+    }
+
+  </script>
+
+</body>
+</html>
