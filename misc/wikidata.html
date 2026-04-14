@@ -255,7 +255,7 @@
     </div>
   </main>
 
-  <script>
+      <script>
     const idInput = document.getElementById("idInput");
     const slider = document.getElementById("slider");
     const frame = document.getElementById("frame");
@@ -281,7 +281,6 @@
     }
 
     function normalizeL(value) {
-      // 英数字とハイフンだけ許可。先頭のLは入力しなくてOKな仕様
       return String(value)
         .trim()
         .replace(/^L/i, "")
@@ -295,18 +294,21 @@
       return normalizeL(idInput.value);
     }
 
-    function getFullEntityId() {
+    function getDisplayId() {
       const raw = getCurrentId();
-      if (!raw) {
-        return null;
-      }
+      if (!raw) return null;
       return `${currentMode}${raw}`;
     }
 
     function getUrl() {
-      const fullId = getFullEntityId();
-      if (!fullId) return null;
-      return `https://www.wikidata.org/wiki/${fullId}`;
+      const displayId = getDisplayId();
+      if (!displayId) return null;
+
+      if (currentMode === "Q") {
+        return `https://www.wikidata.org/wiki/${displayId}`;
+      }
+
+      return `https://www.wikidata.org/wiki/Lexeme:${displayId}`;
     }
 
     function updateModeUI() {
@@ -343,10 +345,8 @@
       const oldValue = idInput.value;
 
       if (mode === "Q") {
-        // L → Q は数字だけ抜き出す
         idInput.value = normalizeQ(oldValue);
       } else {
-        // Q → L はそのまま数字を持ち込める
         idInput.value = normalizeL(oldValue);
       }
 
@@ -384,10 +384,11 @@
 
     function loadPage() {
       syncFromInput();
-      const fullId = getFullEntityId();
+
+      const displayId = getDisplayId();
       const url = getUrl();
 
-      if (!fullId || !url) {
+      if (!displayId || !url) {
         status.textContent = "IDを入力してください";
         return;
       }
@@ -395,7 +396,7 @@
       frame.src = url;
       currentLink.href = url;
       currentLink.textContent = url;
-      status.textContent = `${fullId} を表示中`;
+      status.textContent = `${displayId} を表示中`;
     }
 
     function openInNewTab() {
