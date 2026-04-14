@@ -17,6 +17,7 @@
       color: #222;
     }
 
+    /* 左サイドバー */
     .sidebar {
       width: 320px;
       background: #ffffff;
@@ -53,11 +54,9 @@
     .prefix {
       font-size: 28px;
       font-weight: bold;
-      min-width: 28px;
-      text-align: center;
     }
 
-    input[type="text"] {
+    input[type="number"] {
       width: 100%;
       font-size: 26px;
       padding: 8px 10px;
@@ -103,7 +102,6 @@
       border: 1px solid #dadde1;
       font-size: 14px;
       min-height: 44px;
-      line-height: 1.5;
     }
 
     .hint {
@@ -112,6 +110,7 @@
       line-height: 1.5;
     }
 
+    /* 右側メイン */
     .main {
       flex: 1;
       display: flex;
@@ -157,22 +156,6 @@
     .small-row button {
       flex: 1;
     }
-
-    .toggle-row {
-      display: flex;
-      gap: 8px;
-    }
-
-    .toggle-row button.active {
-      background: #3366cc;
-      color: white;
-      border-color: #3366cc;
-    }
-
-    .disabled-note {
-      font-size: 12px;
-      color: #777;
-    }
   </style>
 </head>
 <body>
@@ -180,25 +163,16 @@
     <h1>Wikidata番号ガチャ</h1>
 
     <div class="section">
-      <label>モード</label>
-      <div class="toggle-row">
-        <button id="modeQ" class="active" type="button">Q</button>
-        <button id="modeL" type="button">L</button>
-      </div>
-    </div>
-
-    <div class="section">
-      <label for="idInput">ID</label>
+      <label for="num">ID番号</label>
       <div class="id-row">
-        <span class="prefix" id="prefix">Q</span>
-        <input type="text" id="idInput" value="1" inputmode="numeric" autocomplete="off">
+        <span class="prefix">Q</span>
+        <input type="number" id="num" value="1" min="1" step="1">
       </div>
     </div>
 
     <div class="section">
-      <label for="slider">スライダー（Q専用）</label>
+      <label for="slider">スライダー</label>
       <input type="range" id="slider" min="1" max="3000000" value="1">
-      <div class="disabled-note" id="sliderNote">Qモードでは使えます</div>
     </div>
 
     <div class="section">
@@ -232,10 +206,10 @@
     <div class="section">
       <label>操作メモ</label>
       <div class="hint">
-        ・Qモードは数字のみ対応<br>
-        ・Lモードは文字を含むLexeme IDに対応（例: 1, 123-F1, 77-S2）<br>
+        ・数字入力ボックスは ↑↓ キーで増減できます<br>
         ・Enter で表示できます<br>
-        ・「ページへ飛ぶ」でWikidata本体を新しいタブで開けます
+        ・「ページへ飛ぶ」でWikidata本体を新しいタブで開けます<br>
+        ・右側は大きめ表示エリアです
       </div>
     </div>
   </aside>
@@ -255,188 +229,65 @@
     </div>
   </main>
 
-      <script>
-    const idInput = document.getElementById("idInput");
+  <script>
+    const num = document.getElementById("num");
     const slider = document.getElementById("slider");
     const frame = document.getElementById("frame");
     const currentLink = document.getElementById("currentLink");
     const status = document.getElementById("status");
-    const prefix = document.getElementById("prefix");
-
-    const modeQBtn = document.getElementById("modeQ");
-    const modeLBtn = document.getElementById("modeL");
-    const sliderNote = document.getElementById("sliderNote");
-
-    const minus1 = document.getElementById("minus1");
-    const plus1 = document.getElementById("plus1");
-    const minus10 = document.getElementById("minus10");
-    const plus10 = document.getElementById("plus10");
-    const randomBtn = document.getElementById("randomBtn");
-
-    let currentMode = "Q";
-
-    function normalizeQ(value) {
-      const digits = String(value).replace(/\D/g, "");
-      return String(Math.max(1, Number(digits) || 1));
-    }
-
-    function normalizeL(value) {
-      return String(value)
-        .trim()
-        .replace(/^L/i, "")
-        .replace(/[^A-Za-z0-9-]/g, "");
-    }
-
-    function getCurrentId() {
-      if (currentMode === "Q") {
-        return normalizeQ(idInput.value);
-      }
-      return normalizeL(idInput.value);
-    }
-
-    function getDisplayId() {
-      const raw = getCurrentId();
-      if (!raw) return null;
-      return `${currentMode}${raw}`;
-    }
 
     function getUrl() {
-      const displayId = getDisplayId();
-      if (!displayId) return null;
-
-      if (currentMode === "Q") {
-        return `https://www.wikidata.org/wiki/${displayId}`;
-      }
-
-      return `https://www.wikidata.org/wiki/Lexeme:${displayId}`;
+      const id = Math.max(1, Number(num.value) || 1);
+      return `https://www.wikidata.org/wiki/Q${id}`;
     }
 
-    function updateModeUI() {
-      prefix.textContent = currentMode;
-
-      modeQBtn.classList.toggle("active", currentMode === "Q");
-      modeLBtn.classList.toggle("active", currentMode === "L");
-
-      const isQ = currentMode === "Q";
-      slider.disabled = !isQ;
-      minus1.disabled = !isQ;
-      plus1.disabled = !isQ;
-      minus10.disabled = !isQ;
-      plus10.disabled = !isQ;
-      randomBtn.disabled = !isQ;
-
-      if (isQ) {
-        idInput.inputMode = "numeric";
-        idInput.value = normalizeQ(idInput.value);
-        slider.value = normalizeQ(idInput.value);
-        sliderNote.textContent = "Qモードでは使えます";
-      } else {
-        idInput.inputMode = "text";
-        idInput.value = normalizeL(idInput.value);
-        sliderNote.textContent = "Lモードでは使えません";
-      }
-
-      updateLinkOnly();
-    }
-
-    function setMode(mode) {
-      if (mode === currentMode) return;
-
-      const oldValue = idInput.value;
-
-      if (mode === "Q") {
-        idInput.value = normalizeQ(oldValue);
-      } else {
-        idInput.value = normalizeL(oldValue);
-      }
-
-      currentMode = mode;
-      updateModeUI();
-      status.textContent = `${mode}モードに切り替えました`;
-    }
-
-    function syncFromInput() {
-      if (currentMode === "Q") {
-        idInput.value = normalizeQ(idInput.value);
-        slider.value = idInput.value;
-      } else {
-        idInput.value = normalizeL(idInput.value);
-      }
+    function syncFromNumber() {
+      const value = Math.max(1, Number(num.value) || 1);
+      num.value = value;
+      slider.value = value;
     }
 
     function syncFromSlider() {
-      if (currentMode !== "Q") return;
-      idInput.value = slider.value;
+      num.value = slider.value;
     }
 
     function updateLinkOnly() {
-      syncFromInput();
       const url = getUrl();
-
-      if (url) {
-        currentLink.href = url;
-        currentLink.textContent = url;
-      } else {
-        currentLink.href = "#";
-        currentLink.textContent = "IDが空です";
-      }
+      currentLink.href = url;
+      currentLink.textContent = url;
     }
 
     function loadPage() {
-      syncFromInput();
-
-      const displayId = getDisplayId();
+      syncFromNumber();
       const url = getUrl();
-
-      if (!displayId || !url) {
-        status.textContent = "IDを入力してください";
-        return;
-      }
-
       frame.src = url;
       currentLink.href = url;
       currentLink.textContent = url;
-      status.textContent = `${displayId} を表示中`;
+      status.textContent = `Q${num.value} を表示中`;
     }
 
     function openInNewTab() {
-      syncFromInput();
+      syncFromNumber();
       const url = getUrl();
-
-      if (!url) {
-        status.textContent = "IDを入力してください";
-        return;
-      }
-
       window.open(url, "_blank");
     }
 
     function changeValue(amount) {
-      if (currentMode !== "Q") return;
-
-      const current = Math.max(1, Number(idInput.value) || 1);
-      idInput.value = Math.max(1, current + amount);
-      syncFromInput();
+      const current = Math.max(1, Number(num.value) || 1);
+      num.value = Math.max(1, current + amount);
+      syncFromNumber();
       updateLinkOnly();
     }
 
     function randomJump() {
-      if (currentMode !== "Q") return;
-
       const r = Math.floor(Math.random() * 3000000) + 1;
-      idInput.value = r;
-      syncFromInput();
+      num.value = r;
+      syncFromNumber();
       loadPage();
     }
 
     async function copyUrl() {
       const url = getUrl();
-
-      if (!url) {
-        status.textContent = "コピーできるURLがありません";
-        return;
-      }
-
       try {
         await navigator.clipboard.writeText(url);
         status.textContent = `URLをコピーしました: ${url}`;
@@ -445,8 +296,8 @@
       }
     }
 
-    idInput.addEventListener("input", () => {
-      syncFromInput();
+    num.addEventListener("input", () => {
+      syncFromNumber();
       updateLinkOnly();
     });
 
@@ -455,26 +306,23 @@
       updateLinkOnly();
     });
 
-    idInput.addEventListener("keydown", (e) => {
+    num.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         loadPage();
       }
     });
-
-    modeQBtn.addEventListener("click", () => setMode("Q"));
-    modeLBtn.addEventListener("click", () => setMode("L"));
 
     document.getElementById("showBtn").addEventListener("click", loadPage);
     document.getElementById("openBtn").addEventListener("click", openInNewTab);
     document.getElementById("randomBtn").addEventListener("click", randomJump);
     document.getElementById("copyBtn").addEventListener("click", copyUrl);
 
-    minus1.addEventListener("click", () => changeValue(-1));
-    plus1.addEventListener("click", () => changeValue(1));
-    minus10.addEventListener("click", () => changeValue(-10));
-    plus10.addEventListener("click", () => changeValue(10));
+    document.getElementById("minus1").addEventListener("click", () => changeValue(-1));
+    document.getElementById("plus1").addEventListener("click", () => changeValue(1));
+    document.getElementById("minus10").addEventListener("click", () => changeValue(-10));
+    document.getElementById("plus10").addEventListener("click", () => changeValue(10));
 
-    updateModeUI();
+    updateLinkOnly();
   </script>
 </body>
 </html>
