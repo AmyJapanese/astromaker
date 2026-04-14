@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Wikidata番号ガチャ</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      height: 100vh;
+      display: flex;
+      background: #f5f6f8;
+      color: #222;
+    }
+
+    .sidebar {
+      width: 320px;
+      background: #ffffff;
+      border-right: 1px solid #dcdfe4;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
+    }
+
+    .sidebar h1 {
+      font-size: 24px;
+      margin: 0 0 8px 0;
+    }
+
+    .section {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .section label {
+      font-weight: bold;
+      font-size: 14px;
+    }
+
+    .id-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .prefix {
+      font-size: 28px;
+      font-weight: bold;
+      min-width: 28px;
+      text-align: center;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      font-size: 26px;
+      padding: 8px 10px;
+    }
+
+    input[type="range"] {
+      width: 100%;
+    }
+
+    .button-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    button {
+      padding: 12px;
+      font-size: 15px;
+      border: 1px solid #c8ccd1;
+      background: #fff;
+      cursor: pointer;
+      border-radius: 8px;
+    }
+
+    button:hover {
+      background: #f0f2f5;
+    }
+
+    .primary {
+      background: #3366cc;
+      color: white;
+      border-color: #3366cc;
+    }
+
+    .primary:hover {
+      background: #2a57ad;
+    }
+
+    .status-box {
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #f8f9fa;
+      border: 1px solid #dadde1;
+      font-size: 14px;
+      min-height: 44px;
+      line-height: 1.5;
+    }
+
+    .hint {
+      font-size: 13px;
+      color: #666;
+      line-height: 1.5;
+    }
+
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .topbar {
+      background: #fff;
+      border-bottom: 1px solid #dcdfe4;
+      padding: 14px 20px;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .current-link {
+      word-break: break-all;
+      color: #3366cc;
+      text-decoration: none;
+    }
+
+    .viewer {
+      flex: 1;
+      padding: 12px;
+    }
+
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: 1px solid #cfd3d8;
+      border-radius: 10px;
+      background: white;
+    }
+
+    .small-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    .small-row button {
+      flex: 1;
+    }
+
+    .toggle-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .toggle-row button.active {
+      background: #3366cc;
+      color: white;
+      border-color: #3366cc;
+    }
+
+    .disabled-note {
+      font-size: 12px;
+      color: #777;
+    }
+  </style>
+</head>
+<body>
+  <aside class="sidebar">
+    <h1>Wikidata番号ガチャ</h1>
+
+    <div class="section">
+      <label>モード</label>
+      <div class="toggle-row">
+        <button id="modeQ" class="active" type="button">Q</button>
+        <button id="modeL" type="button">L</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <label for="idInput">ID</label>
+      <div class="id-row">
+        <span class="prefix" id="prefix">Q</span>
+        <input type="text" id="idInput" value="1" inputmode="numeric" autocomplete="off">
+      </div>
+    </div>
+
+    <div class="section">
+      <label for="slider">スライダー（Q専用）</label>
+      <input type="range" id="slider" min="1" max="3000000" value="1">
+      <div class="disabled-note" id="sliderNote">Qモードでは使えます</div>
+    </div>
+
+    <div class="section">
+      <div class="button-grid">
+        <button id="minus1">-1</button>
+        <button id="plus1">+1</button>
+        <button id="minus10">-10</button>
+        <button id="plus10">+10</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="small-row">
+        <button class="primary" id="showBtn">表示</button>
+        <button id="openBtn">ページへ飛ぶ</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="small-row">
+        <button id="randomBtn">ランダム</button>
+        <button id="copyBtn">URLコピー</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <label>状態</label>
+      <div class="status-box" id="status">まだ読み込んでいません</div>
+    </div>
+
+    <div class="section">
+      <label>操作メモ</label>
+      <div class="hint">
+        ・Qモードは数字のみ対応<br>
+        ・Lモードは文字を含むLexeme IDに対応（例: 1, 123-F1, 77-S2）<br>
+        ・Enter で表示できます<br>
+        ・「ページへ飛ぶ」でWikidata本体を新しいタブで開けます
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div>
+        現在のURL:
+        <a id="currentLink" class="current-link" href="https://www.wikidata.org/wiki/Q1" target="_blank">
+          https://www.wikidata.org/wiki/Q1
+        </a>
+      </div>
+    </div>
+
+    <div class="viewer">
+      <iframe id="frame" src="https://www.wikidata.org/wiki/Q1"></iframe>
+    </div>
+  </main>
+
+      <script>
+    const idInput = document.getElementById("idInput");
+    const slider = document.getElementById("slider");
+    const frame = document.getElementById("frame");
+    const currentLink = document.getElementById("currentLink");
+    const status = document.getElementById("status");
+    const prefix = document.getElementById("prefix");
+
+    const modeQBtn = document.getElementById("modeQ");
+    const modeLBtn = document.getElementById("modeL");
+    const sliderNote = document.getElementById("sliderNote");
+
+    const minus1 = document.getElementById("minus1");
+    const plus1 = document.getElementById("plus1");
+    const minus10 = document.getElementById("minus10");
+    const plus10 = document.getElementById("plus10");
+    const randomBtn = document.getElementById("randomBtn");
+
+    let currentMode = "Q";
+
+    function normalizeQ(value) {
+      const digits = String(value).replace(/\D/g, "");
+      return String(Math.max(1, Number(digits) || 1));
+    }
+
+    function normalizeL(value) {
+      return String(value)
+        .trim()
+        .replace(/^L/i, "")
+        .replace(/[^A-Za-z0-9-]/g, "");
+    }
+
+    function getCurrentId() {
+      if (currentMode === "Q") {
+        return normalizeQ(idInput.value);
+      }
+      return normalizeL(idInput.value);
+    }
+
+    function getDisplayId() {
+      const raw = getCurrentId();
+      if (!raw) return null;
+      return `${currentMode}${raw}`;
+    }
+
+    function getUrl() {
+      const displayId = getDisplayId();
+      if (!displayId) return null;
+
+      if (currentMode === "Q") {
+        return `https://www.wikidata.org/wiki/${displayId}`;
+      }
+
+      return `https://www.wikidata.org/wiki/Lexeme:${displayId}`;
+    }
+
+    function updateModeUI() {
+      prefix.textContent = currentMode;
+
+      modeQBtn.classList.toggle("active", currentMode === "Q");
+      modeLBtn.classList.toggle("active", currentMode === "L");
+
+      const isQ = currentMode === "Q";
+      slider.disabled = !isQ;
+      minus1.disabled = !isQ;
+      plus1.disabled = !isQ;
+      minus10.disabled = !isQ;
+      plus10.disabled = !isQ;
+      randomBtn.disabled = !isQ;
+
+      if (isQ) {
+        idInput.inputMode = "numeric";
+        idInput.value = normalizeQ(idInput.value);
+        slider.value = normalizeQ(idInput.value);
+        sliderNote.textContent = "Qモードでは使えます";
+      } else {
+        idInput.inputMode = "text";
+        idInput.value = normalizeL(idInput.value);
+        sliderNote.textContent = "Lモードでは使えません";
+      }
+
+      updateLinkOnly();
+    }
+
+    function setMode(mode) {
+      if (mode === currentMode) return;
+
+      const oldValue = idInput.value;
+
+      if (mode === "Q") {
+        idInput.value = normalizeQ(oldValue);
+      } else {
+        idInput.value = normalizeL(oldValue);
+      }
+
+      currentMode = mode;
+      updateModeUI();
+      status.textContent = `${mode}モードに切り替えました`;
+    }
+
+    function syncFromInput() {
+      if (currentMode === "Q") {
+        idInput.value = normalizeQ(idInput.value);
+        slider.value = idInput.value;
+      } else {
+        idInput.value = normalizeL(idInput.value);
+      }
+    }
+
+    function syncFromSlider() {
+      if (currentMode !== "Q") return;
+      idInput.value = slider.value;
+    }
+
+    function updateLinkOnly() {
+      syncFromInput();
+      const url = getUrl();
+
+      if (url) {
+        currentLink.href = url;
+        currentLink.textContent = url;
+      } else {
+        currentLink.href = "#";
+        currentLink.textContent = "IDが空です";
+      }
+    }
+
+    function loadPage() {
+      syncFromInput();
+
+      const displayId = getDisplayId();
+      const url = getUrl();
+
+      if (!displayId || !url) {
+        status.textContent = "IDを入力してください";
+        return;
+      }
+
+      frame.src = url;
+      currentLink.href = url;
+      currentLink.textContent = url;
+      status.textContent = `${displayId} を表示中`;
+    }
+
+    function openInNewTab() {
+      syncFromInput();
+      const url = getUrl();
+
+      if (!url) {
+        status.textContent = "IDを入力してください";
+        return;
+      }
+
+      window.open(url, "_blank");
+    }
+
+    function changeValue(amount) {
+      if (currentMode !== "Q") return;
+
+      const current = Math.max(1, Number(idInput.value) || 1);
+      idInput.value = Math.max(1, current + amount);
+      syncFromInput();
+      updateLinkOnly();
+    }
+
+    function randomJump() {
+      if (currentMode !== "Q") return;
+
+      const r = Math.floor(Math.random() * 3000000) + 1;
+      idInput.value = r;
+      syncFromInput();
+      loadPage();
+    }
+
+    async function copyUrl() {
+      const url = getUrl();
+
+      if (!url) {
+        status.textContent = "コピーできるURLがありません";
+        return;
+      }
+
+      try {
+        await navigator.clipboard.writeText(url);
+        status.textContent = `URLをコピーしました: ${url}`;
+      } catch (e) {
+        status.textContent = "コピーに失敗しました";
+      }
+    }
+
+    idInput.addEventListener("input", () => {
+      syncFromInput();
+      updateLinkOnly();
+    });
+
+    slider.addEventListener("input", () => {
+      syncFromSlider();
+      updateLinkOnly();
+    });
+
+    idInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        loadPage();
+      }
+    });
+
+    modeQBtn.addEventListener("click", () => setMode("Q"));
+    modeLBtn.addEventListener("click", () => setMode("L"));
+
+    document.getElementById("showBtn").addEventListener("click", loadPage);
+    document.getElementById("openBtn").addEventListener("click", openInNewTab);
+    document.getElementById("randomBtn").addEventListener("click", randomJump);
+    document.getElementById("copyBtn").addEventListener("click", copyUrl);
+
+    minus1.addEventListener("click", () => changeValue(-1));
+    plus1.addEventListener("click", () => changeValue(1));
+    minus10.addEventListener("click", () => changeValue(-10));
+    plus10.addEventListener("click", () => changeValue(10));
+
+    updateModeUI();
+  </script>
+</body>
+</html>
